@@ -1,42 +1,66 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { RefreshCw, CheckCircle, Clock, ChevronDown, Loader2, AlertCircle } from "lucide-react";
 import { SectionHeader } from "../components/ui";
-import { retrainingHistory } from "../data/mockData";
+import { useApi } from "../hooks/useApi";
+import { apiRetrainHistory, apiStartRetrain, apiRetrainStatus } from "../utils/api";
 
-const STEPS = [
-  "Memuat dataset terbaru...",
-  "Preprocessing & feature engineering...",
-  "Training model dengan cross-validation...",
-  "Evaluasi performa model...",
-  "Menyimpan model terbaru...",
-];
+const STEPS = ["Memuat dataset terbaru...", "Preprocessing & feature engineering...", "Training model dengan cross-validation...", "Evaluasi performa model...", "Menyimpan model terbaru..."];
 
 export default function Retrain() {
-  const [model, setModel]       = useState("RFR");
-  const [running, setRunning]   = useState(false);
-  const [step, setStep]         = useState(-1);
-  const [done, setDone]         = useState(false);
-  const [result, setResult]     = useState(null);
+  const [model, setModel] = useState("RFR");
+  const [running, setRunning] = useState(false);
+  const [step, setStep] = useState(-1);
+  const [done, setDone] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
 
-  const handleRetrain = () => {
+  const { data: histData, loading, refetch } = useApi(apiRetrainHistory);
+
+  const handleRetrain = async () => {
     setRunning(true);
     setDone(false);
     setStep(0);
     setResult(null);
+    setError("");
 
-    STEPS.forEach((_, i) => {
-      setTimeout(() => {
-        setStep(i);
-        if (i === STEPS.length - 1) {
-          setTimeout(() => {
+    try {
+      // Mulai retrain di backend — ini long-running, poll status
+      const res = await apiStartRetrain({ model_name: model });
+      const retrainId = res.id;
+
+      // Simulate steps while polling
+      STEPS.forEach((_, i) => {
+        setTimeout(() => setStep(i), i * 900);
+      });
+
+      // Poll status sampai selesai
+      const poll = async () => {
+        try {
+          const status = await apiRetrainStatus(retrainId);
+          if (status.status === "selesai" || status.status === "sukses") {
             setRunning(false);
             setDone(true);
-            setResult({ r2: 0.879, mae: 94, rmse: 128, durasi: "4m 17s" });
-          }, 900);
+            setResult(status);
+            refetch();
+          } else if (status.status === "gagal") {
+            setRunning(false);
+            setError("Retrain gagal: " + (status.error || "Unknown error"));
+            refetch();
+          } else {
+            setTimeout(poll, 2000);
+          }
+        } catch {
+          setTimeout(poll, 3000);
         }
-      }, i * 900);
-    });
+      };
+      setTimeout(poll, STEPS.length * 900 + 500);
+    } catch (e) {
+      setRunning(false);
+      setError(e.message);
+    }
   };
+
+  const history = histData || [];
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
@@ -52,11 +76,18 @@ export default function Retrain() {
           </div>
         </div>
 
+        {error && (
+          <div className="flex items-center gap-2 bg-accent-rose/10 border border-accent-rose/30 rounded-xl p-3">
+            <AlertCircle size={14} className="text-accent-rose" />
+            <p className="text-sm text-accent-rose">{error}</p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="label">Pilih Model</label>
             <div className="relative">
-              <select className="select-field pr-10" value={model} onChange={e => setModel(e.target.value)}>
+              <select className="select-field pr-10" value={model} onChange={(e) => setModel(e.target.value)}>
                 <option value="RFR">Random Forest Regressor</option>
                 <option value="DTR">Decision Tree Regressor</option>
                 <option value="MLR">Multiple Linear Regression</option>
@@ -69,7 +100,7 @@ export default function Retrain() {
             <label className="label">Dataset</label>
             <div className="input-field flex items-center justify-between">
               <span className="text-surface-300">dataset_bandung_latest.csv</span>
-              <span className="badge-green">12.450 rows</span>
+              <span className="badge-green">Terbaru</span>
             </div>
           </div>
         </div>
@@ -96,22 +127,29 @@ export default function Retrain() {
             ))}
             {done && result && (
               <div className="mt-4 pt-4 border-t border-surface-800 space-y-1">
-                <p className="text-brand-400">✓ Training selesai — {result.durasi}</p>
-                <p className="text-surface-300">R² baru: <span className="text-brand-400">{result.r2}</span> | MAE: {result.mae} Jt | RMSE: {result.rmse} Jt</p>
+                <p className="text-brand-400">✓ Training selesai{result.durasi ? ` — ${result.durasi}` : ""}</p>
+                {result.r2_baru && (
+                  <p className="text-surface-300">
+                    R² baru: <span className="text-brand-400">{result.r2_baru}</span>
+                    {result.r2_lama ? ` | Lama: ${result.r2_lama}` : ""}
+                  </p>
+                )}
               </div>
             )}
           </div>
         )}
 
-        <button
-          onClick={handleRetrain}
-          disabled={running}
-          className="btn-primary flex items-center justify-center gap-2 w-full py-3 disabled:opacity-50"
-        >
+        <button onClick={handleRetrain} disabled={running} className="btn-primary flex items-center justify-center gap-2 w-full py-3 disabled:opacity-50">
           {running ? (
-            <><Loader2 size={16} className="animate-spin" />Melatih Ulang Model...</>
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              Melatih Ulang Model...
+            </>
           ) : (
-            <><RefreshCw size={16} />Mulai Retrain</>
+            <>
+              <RefreshCw size={16} />
+              Mulai Retrain
+            </>
           )}
         </button>
 
@@ -120,8 +158,6 @@ export default function Retrain() {
             <CheckCircle size={16} className="text-brand-400 flex-shrink-0 mt-0.5" />
             <p className="text-sm text-surface-300">
               Model <span className="text-brand-300 font-semibold">{model}</span> berhasil diperbarui.
-              R² meningkat dari <span className="font-mono text-accent-amber">0.858</span> menjadi{" "}
-              <span className="font-mono text-brand-400">0.879</span>.
             </p>
           </div>
         )}
@@ -130,41 +166,47 @@ export default function Retrain() {
       {/* History */}
       <div className="card overflow-hidden">
         <div className="p-5 border-b border-surface-800">
-          <SectionHeader title="Riwayat Retraining" sub="5 training terakhir" />
+          <SectionHeader title="Riwayat Retraining" sub={`${history.length} training terakhir`} />
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-surface-800 bg-surface-900/50">
-                <th className="table-th">Tanggal</th>
-                <th className="table-th">Model</th>
-                <th className="table-th">Dataset</th>
-                <th className="table-th">R² Lama</th>
-                <th className="table-th">R² Baru</th>
-                <th className="table-th">Durasi</th>
-                <th className="table-th">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {retrainingHistory.map(r => (
-                <tr key={r.id} className="table-row">
-                  <td className="table-td text-surface-400">{r.tanggal}</td>
-                  <td className="table-td font-display font-semibold text-surface-100">{r.model}</td>
-                  <td className="table-td font-mono text-surface-400">{r.dataset}</td>
-                  <td className="table-td font-mono text-surface-400">{r.r2Lama}</td>
-                  <td className="table-td font-mono text-brand-400">{r.r2Baru}</td>
-                  <td className="table-td font-mono text-surface-400">{r.durasi}</td>
-                  <td className="table-td">
-                    <span className={r.status === "sukses" ? "badge-green" : "badge-rose"}>
-                      {r.status === "sukses" ? <CheckCircle size={10} /> : <AlertCircle size={10} />}
-                      {r.status}
-                    </span>
-                  </td>
+        {loading ? (
+          <div className="flex items-center justify-center py-10">
+            <Loader2 size={20} className="animate-spin text-brand-400" />
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-surface-800 bg-surface-900/50">
+                  <th className="table-th">Tanggal</th>
+                  <th className="table-th">Model</th>
+                  <th className="table-th">Dataset</th>
+                  <th className="table-th">R² Lama</th>
+                  <th className="table-th">R² Baru</th>
+                  <th className="table-th">Durasi</th>
+                  <th className="table-th">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {history.map((r) => (
+                  <tr key={r.id} className="table-row">
+                    <td className="table-td text-surface-400">{r.tanggal || r.started_at}</td>
+                    <td className="table-td font-display font-semibold text-surface-100">{r.model_name || r.model}</td>
+                    <td className="table-td font-mono text-surface-400">{r.dataset || "—"}</td>
+                    <td className="table-td font-mono text-surface-400">{r.r2_lama || "—"}</td>
+                    <td className="table-td font-mono text-brand-400">{r.r2_baru || "—"}</td>
+                    <td className="table-td font-mono text-surface-400">{r.durasi || "—"}</td>
+                    <td className="table-td">
+                      <span className={r.status === "sukses" || r.status === "selesai" ? "badge-green" : r.status === "proses" ? "badge-orange" : "badge-rose"}>
+                        {r.status === "sukses" || r.status === "selesai" ? <CheckCircle size={10} /> : r.status === "proses" ? <Loader2 size={10} className="animate-spin" /> : <AlertCircle size={10} />}
+                        {r.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

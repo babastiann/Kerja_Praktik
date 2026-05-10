@@ -1,46 +1,55 @@
 import { useState } from "react";
-import { Home, ChevronDown, Loader2, CheckCircle, Info, Sparkles } from "lucide-react";
+import { Home, ChevronDown, Loader2, CheckCircle, Info, Sparkles, AlertCircle } from "lucide-react";
 import { ProgressRing } from "../components/ui";
 import { lokasiOptions, formatRupiah } from "../data/mockData";
+import { useApi } from "../hooks/useApi";
+import { apiModelActive, apiPredict } from "../utils/api";
 
 const fasilitasOptions = ["Kolam Renang", "Taman", "CCTV", "Water Heater", "AC", "Carport", "Listrik 2200W+", "PDAM"];
 
-function hitungPrediksi({ lokasi, lt, lb, kt, km, garasi, fasilitas }) {
-  const baseHarga = {
-    "Dago": 3.0, "Setiabudi": 2.8, "Coblong": 2.2, "Cidadap": 2.5,
-    "Sukajadi": 1.7, "Buah Batu": 1.5, "Antapani": 1.3,
-  };
-  const base   = (baseHarga[lokasi] ?? 1.0) * 1_000_000_000;
-  const harga  = base + lt * 3_500_000 + lb * 4_000_000 + kt * 80_000_000 + km * 50_000_000 + garasi * 100_000_000 + fasilitas.length * 30_000_000;
-  const conf   = Math.min(95, 70 + fasilitas.length * 1.5 + (lt > 100 ? 5 : 0));
-  const margin = harga * 0.08;
-  return { harga: Math.round(harga), min: Math.round(harga - margin), max: Math.round(harga + margin), conf: Math.round(conf) };
-}
-
 export default function Prediksi() {
+  const { data: modelAktif } = useApi(apiModelActive);
+
   const [form, setForm] = useState({
     lokasi: "", lt: "", lb: "", kt: "3", km: "2", garasi: "1", fasilitas: [],
   });
-  const [result, setResult] = useState(null);
+  const [result, setResult]   = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState("");
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
   const toggleFasilitas = (f) => {
     setForm(prev => ({
       ...prev,
-      fasilitas: prev.fasilitas.includes(f) ? prev.fasilitas.filter(x => x !== f) : [...prev.fasilitas, f],
+      fasilitas: prev.fasilitas.includes(f)
+        ? prev.fasilitas.filter(x => x !== f)
+        : [...prev.fasilitas, f],
     }));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!form.lokasi || !form.lt || !form.lb) return;
     setLoading(true);
+    setError("");
     setResult(null);
-    setTimeout(() => {
-      setResult(hitungPrediksi({ ...form, lt: +form.lt, lb: +form.lb, kt: +form.kt, km: +form.km, garasi: +form.garasi }));
+    try {
+      const data = await apiPredict({
+        lokasi:        form.lokasi,
+        luas_tanah:    Number(form.lt),
+        luas_bangunan: Number(form.lb),
+        kamar_tidur:   Number(form.kt),
+        kamar_mandi:   Number(form.km),
+        garasi:        Number(form.garasi),
+        fasilitas:     form.fasilitas,
+        model:         modelAktif?.model_name || "RFR",
+      });
+      setResult(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
       setLoading(false);
-    }, 1800);
+    }
   };
 
   return (
@@ -57,6 +66,13 @@ export default function Prediksi() {
               <p className="text-xs text-surface-500">Isi detail properti untuk mendapatkan estimasi harga</p>
             </div>
           </div>
+
+          {error && (
+            <div className="flex items-center gap-2 bg-accent-rose/10 border border-accent-rose/30 rounded-xl p-3">
+              <AlertCircle size={14} className="text-accent-rose flex-shrink-0" />
+              <p className="text-sm text-accent-rose">{error}</p>
+            </div>
+          )}
 
           {/* Lokasi */}
           <div>
@@ -128,11 +144,10 @@ export default function Prediksi() {
             disabled={loading || !form.lokasi || !form.lt || !form.lb}
             className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed py-3"
           >
-            {loading ? (
-              <><Loader2 size={16} className="animate-spin" />Memproses...</>
-            ) : (
-              <><Sparkles size={16} />Prediksi Harga</>
-            )}
+            {loading
+              ? <><Loader2 size={16} className="animate-spin" />Memproses...</>
+              : <><Sparkles size={16} />Prediksi Harga</>
+            }
           </button>
         </div>
 
@@ -145,33 +160,33 @@ export default function Prediksi() {
                 <h3 className="section-title">Hasil Prediksi</h3>
               </div>
 
-              {/* Main price */}
               <div className="text-center py-5 border-y border-surface-800">
                 <p className="text-xs font-display uppercase tracking-widest text-surface-500 mb-2">Estimasi Harga</p>
                 <p className="font-display font-bold text-3xl text-brand-400 tracking-tight">
-                  {formatRupiah(result.harga)}
+                  {formatRupiah(result.harga_prediksi)}
                 </p>
                 <p className="text-xs text-surface-500 font-mono mt-2">
-                  {formatRupiah(result.min)} — {formatRupiah(result.max)}
+                  {formatRupiah(result.harga_min)} — {formatRupiah(result.harga_max)}
                 </p>
               </div>
 
-              {/* Confidence */}
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs text-surface-500 font-display uppercase tracking-wider">Confidence Score</p>
-                  <p className="text-sm text-surface-300 mt-0.5 font-mono">Model: Random Forest</p>
+                  <p className="text-sm text-surface-300 mt-0.5 font-mono">Model: {result.model_digunakan || "RFR"}</p>
+                  {result.kode && (
+                    <p className="text-xs text-surface-500 font-mono mt-0.5">Kode: {result.kode}</p>
+                  )}
                 </div>
-                <ProgressRing value={result.conf} size={72} stroke={6} color="#14b8a6" />
+                <ProgressRing value={result.confidence} size={72} stroke={6} color="#14b8a6" />
               </div>
 
-              {/* Smart remark */}
               <div className="bg-brand-500/5 border border-brand-500/20 rounded-xl p-3.5 flex gap-2.5">
                 <Info size={14} className="text-brand-400 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-surface-400 leading-relaxed">
                   Rumah di <span className="text-brand-300 font-medium">{form.lokasi}</span> dengan spesifikasi ini
                   tergolong <span className="text-surface-200 font-medium">
-                    {result.harga > 2_000_000_000 ? "premium" : result.harga > 1_200_000_000 ? "menengah atas" : "menengah"}
+                    {result.harga_prediksi > 2_000_000_000 ? "premium" : result.harga_prediksi > 1_200_000_000 ? "menengah atas" : "menengah"}
                   </span> untuk kawasan tersebut.
                 </p>
               </div>
@@ -188,21 +203,25 @@ export default function Prediksi() {
             </div>
           )}
 
-          {/* Info model */}
+          {/* Info model aktif */}
           <div className="card p-4 space-y-2">
             <p className="text-xs font-display font-semibold text-surface-400 uppercase tracking-wider">Model Aktif</p>
             <div className="flex items-center justify-between">
-              <span className="text-sm font-mono text-surface-200">Random Forest</span>
-              <span className="badge-green">R² 0.871</span>
+              <span className="text-sm font-mono text-surface-200">{modelAktif?.model_name || "—"}</span>
+              {modelAktif?.r2_score && <span className="badge-green">R² {modelAktif.r2_score}</span>}
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-surface-500">MAE</span>
-              <span className="text-xs font-mono text-surface-300">Rp 98 Jt</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-surface-500">RMSE</span>
-              <span className="text-xs font-mono text-surface-300">Rp 132 Jt</span>
-            </div>
+            {modelAktif?.mae && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-surface-500">MAE</span>
+                <span className="text-xs font-mono text-surface-300">Rp {modelAktif.mae} Jt</span>
+              </div>
+            )}
+            {modelAktif?.rmse && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-surface-500">RMSE</span>
+                <span className="text-xs font-mono text-surface-300">Rp {modelAktif.rmse} Jt</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

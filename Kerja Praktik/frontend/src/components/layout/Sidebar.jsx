@@ -1,8 +1,9 @@
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard, Home, BarChart2, GitCompare, Activity,
-  Database, Users, RefreshCw, History, MapPin, X, Cpu,
+  Database, Users, RefreshCw, History, MapPin, X, Cpu, LogOut,
 } from "lucide-react";
+import { useAuth } from "../../context/AuthContext";
 
 const navItems = [
   { to: "/",          label: "Dashboard",         icon: LayoutDashboard },
@@ -18,6 +19,8 @@ const navItems = [
 ];
 
 export default function Sidebar({ open, onClose }) {
+  const { user, logout } = useAuth();
+
   return (
     <>
       {/* Overlay mobile */}
@@ -80,17 +83,31 @@ export default function Sidebar({ open, onClose }) {
         </nav>
 
         {/* Footer */}
-        <div className="p-4 border-t border-surface-800">
+        <div className="p-4 border-t border-surface-800 space-y-2">
+          {/* Info user */}
           <div className="flex items-center gap-3 p-3 rounded-xl bg-surface-900">
             <div className="w-8 h-8 rounded-full bg-brand-500/20 border border-brand-500/30 flex items-center justify-center">
-              <span className="text-brand-400 text-xs font-display font-bold">A</span>
+              <span className="text-brand-400 text-xs font-display font-bold">
+                {user?.nama?.charAt(0)?.toUpperCase() ?? "A"}
+              </span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-surface-200 truncate">Admin</p>
-              <p className="text-xs text-surface-500 truncate">admin@rumahai.id</p>
+              <p className="text-sm font-medium text-surface-200 truncate">{user?.nama ?? "Admin"}</p>
+              <p className="text-xs text-surface-500 truncate">{user?.email ?? ""}</p>
             </div>
             <div className="w-2 h-2 rounded-full bg-brand-500 shadow-glow-teal flex-shrink-0" />
           </div>
+
+          {/* Tombol Logout */}
+          <button
+            onClick={logout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl
+                       text-surface-400 hover:text-red-400 hover:bg-red-500/10
+                       transition-colors duration-200 text-sm font-medium"
+          >
+            <LogOut size={16} strokeWidth={1.8} />
+            <span>Logout</span>
+          </button>
         </div>
       </aside>
     </>
